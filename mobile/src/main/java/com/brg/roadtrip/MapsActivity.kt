@@ -13,16 +13,23 @@ import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.gms.common.api.GoogleApiClient
-import com.google.android.gms.location.LocationServices
 import android.content.pm.PackageManager
 import android.support.v4.app.ActivityCompat
 import android.support.v4.content.ContextCompat
 import android.support.v7.app.AlertDialog
 import android.util.Log
+import android.widget.TextView
 import android.widget.Toast
-import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.common.api.ResultCallback
+import com.google.android.gms.location.*
+import com.google.android.gms.location.LocationServices
+import java.text.DateFormat
+import java.util.*
 
-class MapsActivity : FragmentActivity(), OnMapReadyCallback, GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
+
+class MapsActivity : FragmentActivity(), OnMapReadyCallback,
+        GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener,
+        ResultCallback<LocationSettingsResult>, LocationListener {
 
     // MARK: Constants
 
@@ -33,6 +40,14 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback, GoogleApiClient.Con
     private var mMap: GoogleMap? = null
     private var mGoogleApiClient: GoogleApiClient? = null
     private var mLastLocation: Location? = null
+    private var mLastUpdateTime: String? = null
+    private var mRequestingLocationUpdates: Boolean = true
+
+    // MARK: UI Elements
+
+    private var mLastKnownLatitude: TextView? = null
+    private var mLastKnownLongitude: TextView? = null
+    private var mLastKnownTime: TextView? = null
 
     // MARK: Lifecycle Methods
 
@@ -40,8 +55,7 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback, GoogleApiClient.Con
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_maps)
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
-        val mapFragment = supportFragmentManager
-                .findFragmentById(R.id.map) as SupportMapFragment
+        val mapFragment = supportFragmentManager.findFragmentById(R.id.map) as SupportMapFragment
         mapFragment.getMapAsync(this)
 
         // Create an instance of GoogleAPIClient.
@@ -52,6 +66,10 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback, GoogleApiClient.Con
                     .addApi(LocationServices.API)
                     .build()
         }
+
+        mLastKnownLatitude = findViewById(R.id.last_known_latitude) as TextView?
+        mLastKnownLongitude = findViewById(R.id.last_known_longitude) as TextView?
+        mLastKnownTime = findViewById(R.id.last_known_time) as TextView?
     }
 
     override fun onStart() {
@@ -90,12 +108,18 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback, GoogleApiClient.Con
     override fun onConnected(p0: Bundle?) {
         val permissionCheck = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
         if (PackageManager.PERMISSION_GRANTED == permissionCheck) {
+
+            val builder = LocationSettingsRequest.Builder().addLocationRequest(createLocationRequest())
+            val result = LocationServices.SettingsApi.checkLocationSettings(mGoogleApiClient,
+                    builder.build())
+
+            if (mRequestingLocationUpdates) {
+                startLocationUpdates()
+            }
+
             mLastLocation = LocationServices.FusedLocationApi.getLastLocation(mGoogleApiClient)
             if (mLastLocation != null) {
-                Log.i("JMO", "Got a location! " + mLastLocation)
                 handleLastLocation(mLastLocation!!)
-//                mLatitudeText.setText(String.valueOf(mLastLocation.getLatitude()));
-//                mLongitudeText.setText(String.valueOf(mLastLocation.getLongitude()));
             }
         } else {
             if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_FINE_LOCATION)) {
@@ -152,16 +176,60 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback, GoogleApiClient.Con
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
+    // MARK: ResultCallback Interface Methods
+
+    override fun onResult(result: LocationSettingsResult) {
+        var status = result.status
+        var locationSettingsStates = result.locationSettingsStates
+        when (status.statusCode) {
+            LocationSettingsStatusCodes.SUCCESS -> {
+                Log.i("JMO", "Good")
+            }
+            LocationSettingsStatusCodes.RESOLUTION_REQUIRED -> {
+                Log.i("JMO", "Bad")
+            }
+            LocationSettingsStatusCodes.SETTINGS_CHANGE_UNAVAILABLE -> {
+                Log.i("JMO", "Unclear")
+            }
+        }
+    }
+
+    // MARK: LocationListener Interface Methods
+
+    override fun onLocationChanged(location: Location?) {
+        mLastLocation = location
+        mLastUpdateTime = DateFormat.getTimeInstance().format(Date())
+        handleLastLocation(location!!)
+    }
+
     // MARK: Location Handling
 
-    fun createLocationRequest() {
+    fun createLocationRequest(): LocationRequest {
         val mLocationRequest = LocationRequest()
         mLocationRequest.interval = 10000
         mLocationRequest.fastestInterval = 5000
         mLocationRequest.priority = LocationRequest.PRIORITY_HIGH_ACCURACY
+        return mLocationRequest
     }
 
     fun handleLastLocation(location: Location) {
-        mMap?.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(location.latitude, location.longitude), 15.0f))
+        mMap?.clear()
+        val convertedLocation = LatLng(location.latitude, location.longitude)
+        mMap?.addMarker(MarkerOptions().position(convertedLocation).title("Last Known Location"))
+        mMap?.moveCamera(CameraUpdateFactory.newLatLngZoom(convertedLocation, 15.0f))
+
+        mLastKnownLatitude?.text = location.latitude.toString()
+        mLastKnownLongitude?.text = location.longitude.toString()
+        mLastKnownTime?.text = location.time.toString()
+
+    }
+
+    fun startLocationUpdates() {
+        try {
+            LocationServices.FusedLocationApi.requestLocationUpdates(
+                    mGoogleApiClient, createLocationRequest(), this)
+        } catch (e: SecurityException) {
+            e.printStackTrace()
+        }
     }
 }
