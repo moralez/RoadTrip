@@ -20,9 +20,15 @@ import android.support.v7.app.AlertDialog
 import android.util.Log
 import android.widget.TextView
 import android.widget.Toast
+import com.brg.roadtrip.model.LandmarkResponse
 import com.google.android.gms.common.api.ResultCallback
 import com.google.android.gms.location.*
 import com.google.android.gms.location.LocationServices
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
 import java.text.DateFormat
 import java.util.*
 
@@ -31,11 +37,13 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback,
         GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener,
         ResultCallback<LocationSettingsResult>, LocationListener {
 
-    // MARK: Constants
+    //region Constants
 
     private var MY_PERMISSIONS_REQUEST_ACCESS_FINE_LOCATION = 4000
 
-    // MARK: Properties
+    //endregion
+
+    //region Properties
 
     private var mMap: GoogleMap? = null
     private var mGoogleApiClient: GoogleApiClient? = null
@@ -43,13 +51,17 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback,
     private var mLastUpdateTime: String? = null
     private var mRequestingLocationUpdates: Boolean = true
 
-    // MARK: UI Elements
+    //endregion
+
+    //region UI Elements
 
     private var mLastKnownLatitude: TextView? = null
     private var mLastKnownLongitude: TextView? = null
     private var mLastKnownTime: TextView? = null
 
-    // MARK: Lifecycle Methods
+    //endregion
+
+    //region Lifecycle Methods
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -82,8 +94,9 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback,
         super.onStop()
     }
 
+    //endregion
 
-    // MARK: OnMapReadyCallback Interface Methods
+    //region OnMapReadyCallback Interface Methods
 
     /**
      * Manipulates the map once available.
@@ -103,7 +116,9 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback,
         mMap!!.moveCamera(CameraUpdateFactory.newLatLng(sydney))
     }
 
-    // MARK: GoogleApiClient.ConnectionCallbacks Interface Methods
+    //endregion
+
+    //region GoogleApiClient.ConnectionCallbacks Interface Methods
 
     override fun onConnected(p0: Bundle?) {
         val permissionCheck = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
@@ -142,13 +157,17 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback,
         TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
     }
 
-    // MARK: GoogleApiClient.OnConnectionFailedListener Interface Methods
+    //endregion
+
+    //region GoogleApiClient.OnConnectionFailedListener Interface Methods
 
     override fun onConnectionFailed(p0: ConnectionResult) {
         TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
     }
 
-    // MARK: Permission Request Handling
+    //endregion
+
+    //region Permission Request Handling
 
     fun requestPermissions() {
         ActivityCompat.requestPermissions(this@MapsActivity,
@@ -176,7 +195,9 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback,
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
-    // MARK: ResultCallback Interface Methods
+    //endregion
+
+    //region ResultCallback Interface Methods
 
     override fun onResult(result: LocationSettingsResult) {
         var status = result.status
@@ -194,7 +215,9 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback,
         }
     }
 
-    // MARK: LocationListener Interface Methods
+    //endregion
+
+    //region LocationListener Interface Methods
 
     override fun onLocationChanged(location: Location?) {
         mLastLocation = location
@@ -202,7 +225,9 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback,
         handleLastLocation(location!!)
     }
 
-    // MARK: Location Handling
+    //endregion
+
+    //region Location Handling
 
     fun createLocationRequest(): LocationRequest {
         val mLocationRequest = LocationRequest()
@@ -216,12 +241,13 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback,
         mMap?.clear()
         val convertedLocation = LatLng(location.latitude, location.longitude)
         mMap?.addMarker(MarkerOptions().position(convertedLocation).title("Last Known Location"))
-        mMap?.moveCamera(CameraUpdateFactory.newLatLngZoom(convertedLocation, 15.0f))
+        mMap?.moveCamera(CameraUpdateFactory.newLatLngZoom(convertedLocation, 12.0f))
 
         mLastKnownLatitude?.text = location.latitude.toString()
         mLastKnownLongitude?.text = location.longitude.toString()
         mLastKnownTime?.text = location.time.toString()
 
+        getNearbyLandmarks(location)
     }
 
     fun startLocationUpdates() {
@@ -231,5 +257,38 @@ class MapsActivity : FragmentActivity(), OnMapReadyCallback,
         } catch (e: SecurityException) {
             e.printStackTrace()
         }
+    }
+
+    //endregion
+
+    //region Networking Calls
+
+    fun getNearbyLandmarks(location: Location) {
+        val retrofit = Retrofit.Builder()
+                .baseUrl("http://api.geckolandmarks.com")
+                .addConverterFactory(GsonConverterFactory.create())
+                .build()
+
+        val service = retrofit.create(RoadTripNetworkingService::class.java)
+        service.getLandmarks(location.latitude, location.longitude).enqueue(object : Callback<LandmarkResponse> {
+            override fun onFailure(call: Call<LandmarkResponse>?, t: Throwable?) {
+                Log.i("JMO", "Failure!")
+            }
+
+            override fun onResponse(call: Call<LandmarkResponse>?, response: Response<LandmarkResponse>?) {
+                val landmarkResponse = response?.body() as? LandmarkResponse
+                val landmarks = landmarkResponse?.landmarks
+                val iterator = landmarks?.listIterator()
+                mMap?.clear()
+                while (null != iterator && iterator.hasNext()) {
+                    val landmark = iterator.next()
+                    val convertedLocation = LatLng(landmark.lat!!, landmark.lon!!)
+                    mMap?.addMarker(MarkerOptions().position(convertedLocation).title(landmark.name1!!))
+                }
+
+                val convertedLocation = LatLng(mLastLocation?.latitude!!, mLastLocation?.longitude!!)
+                mMap?.addMarker(MarkerOptions().position(convertedLocation).title("Last Known Location"))
+            }
+        })
     }
 }
